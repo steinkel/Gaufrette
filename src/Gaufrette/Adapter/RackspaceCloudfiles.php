@@ -4,7 +4,7 @@ namespace Gaufrette\Adapter;
 
 use Gaufrette\Adapter;
 use Gaufrette\Util;
-use \CF_Container as RackspaceContainer;
+use OpenCloud\ObjectStore\Resource\Container as RackspaceContainer;
 
 /**
  * Rackspace cloudfiles adapter
@@ -34,10 +34,21 @@ class RackspaceCloudfiles implements Adapter,
      */
     public function read($key)
     {
-         $object = $this->container->get_object($key);
-
-         return $object->read();
+         $object = $this->container->getObject($key);
+		return $object->getContent()->__toString();
     }
+
+/**
+ * Get a temporary url to download the $key param from CloudFiles
+ * @param type $key
+ * @param type $timeInSeconds
+ * @param type $method
+ * @return type
+ */
+	public function getTemporaryUrl($key, $timeInSeconds = 60, $method = 'GET') {
+		$file = $this->container->getObject($key);
+		return $file->getTemporaryUrl($timeInSeconds, $method);
+	}
 
     /**
      * {@inheritDoc}
@@ -53,18 +64,12 @@ class RackspaceCloudfiles implements Adapter,
     /**
      * {@inheritDoc}
      */
-    public function write($key, $content, array $metadata = null)
+    public function write($key, $content, array $metadata = array())
     {
-        $object = $this->tryGetObject($key);
-        if (false === $object) {
-            // the object does not exist, so we create it
-            $object = $this->container->create_object($key);
-        }
-
-        if (!$object->write($content)) {
-            return false;
-        }
-
+		$dataObject = $this->container->uploadObject($key, $content, $metadata);
+		if ($dataObject->getContentLength() === 0) {
+			return false;
+		}
         return Util\Size::fromContent($content);
     }
 
@@ -100,7 +105,7 @@ class RackspaceCloudfiles implements Adapter,
      */
     public function checksum($key)
     {
-        $object = $this->container->get_object($key);
+        $object = $this->container->getObject($key);
 
         return $object->getETag();
     }
@@ -140,11 +145,14 @@ class RackspaceCloudfiles implements Adapter,
     protected function tryGetObject($key)
     {
         try {
-            return $this->container->get_object($key);
-        } catch (\NoSuchObjectException $e) {
+            return $this->container->getObject($key);
+        } catch (\Guzzle\Http\Exception\BadResponseException $e) {
             // the NoSuchObjectException is thrown by the CF_Object during it's
             // creation if the object doesn't exist
-            return false;
+			if ($e->getResponse()->getStatusCode() === 404) {
+				return false;
+			}
+            throw $e;
         }
     }
 }
